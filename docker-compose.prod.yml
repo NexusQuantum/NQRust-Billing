@@ -1,0 +1,39 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: productops-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: productops
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-productops_prod}
+      POSTGRES_DB: productops
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U productops"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  app:
+    image: product-management:latest
+    container_name: productops-app
+    restart: unless-stopped
+    ports:
+      - "${APP_PORT:-3000}:3000"
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://productops:${POSTGRES_PASSWORD:-productops_prod}@postgres:5432/productops
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3000/login || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+volumes:
+  pgdata:

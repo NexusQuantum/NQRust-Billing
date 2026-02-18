@@ -1,0 +1,16 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: productops-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: productops
+      POSTGRES_PASSWORD: productops_dev
+      POSTGRES_DB: productops
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:

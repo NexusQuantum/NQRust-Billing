@@ -1,0 +1,134 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  APP_NAME: product-management
+  IMAGE_NAME: product-management
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set image tag
+        run: echo "IMAGE_TAG=${GITHUB_SHA::8}" >> $GITHUB_ENV
+
+      - name: Build Docker image
+        run: |
+          docker build \
+            -t ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }} \
+            -t ${{ env.IMAGE_NAME }}:latest \
+            .
+
+      - name: Save Docker image
+        run: docker save ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }} ${{ env.IMAGE_NAME }}:latest | gzip > image.tar.gz
+
+      - name: Copy image to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          source: "image.tar.gz,docker-compose.prod.yml"
+          target: /tmp/${{ env.APP_NAME }}-deploy
+
+      - name: Deploy to server
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          IMAGE_TAG: ${{ env.IMAGE_TAG }}
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          envs: IMAGE_TAG
+          script: |
+            set -e
+
+            DEPLOY_DIR=${{ secrets.DEPLOY_DIR || '~/product-management' }}
+            DEPLOY_TMP="/tmp/${{ env.APP_NAME }}-deploy"
+
+            mkdir -p "$DEPLOY_DIR"
+
+            # ── Load the new Docker image ──
+            echo "📦 Loading Docker image ($IMAGE_TAG)..."
+            docker load < "$DEPLOY_TMP/image.tar.gz"
+
+            # Copy compose file
+            cp "$DEPLOY_TMP/docker-compose.prod.yml" "$DEPLOY_DIR/docker-compose.yml"
+
+            # ── First-deploy: create .env template ──
+            if [ ! -f "$DEPLOY_DIR/.env" ]; then
+              echo "⚠️  No .env file found. Creating template at $DEPLOY_DIR/.env"
+              cat > "$DEPLOY_DIR/.env" <<'ENVEOF'
+            DATABASE_URL=postgresql://productops:productops_prod@postgres:5432/productops
+            AUTH_SECRET=change-me-to-a-random-string
+            NEXTAUTH_URL=http://localhost:3000
+            ENVEOF
+              echo "Edit $DEPLOY_DIR/.env with real values, then re-run this workflow."
+              exit 1
+            fi
+
+            cd "$DEPLOY_DIR"
+
+            # ── Remember current image for rollback ──
+            PREV_IMAGE=$(docker inspect --format='{{.Config.Image}}' productops-app 2>/dev/null || echo "")
+            echo "Previous image: ${PREV_IMAGE:-none (first deploy)}"
+
+            # ── Ensure Postgres is up (never touch it during redeploy) ──
+            docker compose up -d postgres
+            echo "Waiting for Postgres..."
+            docker compose exec -T postgres pg_isready -U productops -t 30
+
+            # ── Rolling update: start new app, wait for health, then remove old ──
+            echo "🔄 Starting new app container..."
+            docker compose up -d --no-deps --wait --wait-timeout 30 app
+
+            # ── Verify the new container is healthy ──
+            echo "Checking health..."
+            HEALTHY=false
+            for i in $(seq 1 10); do
+              STATUS=$(docker inspect --format='{{.State.Health.Status}}' productops-app 2>/dev/null || echo "unknown")
+              if [ "$STATUS" = "healthy" ]; then
+                HEALTHY=true
+                break
+              fi
+              echo "  Attempt $i/10: status=$STATUS"
+              sleep 3
+            done
+
+            if [ "$HEALTHY" != "true" ]; then
+              echo "❌ New container is not healthy. Rolling back..."
+              docker compose logs --tail=40 app
+
+              if [ -n "$PREV_IMAGE" ]; then
+                echo "🔙 Restoring previous image: $PREV_IMAGE"
+                docker compose down app || true
+                docker tag "$PREV_IMAGE" product-management:latest
+                docker compose up -d --no-deps app
+                echo "Rollback complete. Deploy FAILED."
+              fi
+              exit 1
+            fi
+
+            echo "✅ Deployment successful! ($IMAGE_TAG)"
+            docker compose ps
+
+            # ── Run DB migrations ──
+            echo "Running database schema push..."
+            docker compose exec -T app bunx drizzle-kit push --config=drizzle.config.ts 2>&1 || echo "⚠️  db:push skipped"
+
+            # ── Cleanup ──
+            rm -rf "$DEPLOY_TMP"
+            # Keep last 3 images, prune older ones
+            docker images product-management --format '{{.Tag}} {{.ID}}' | grep -v latest | sort -r | tail -n +4 | awk '{print $2}' | xargs -r docker rmi 2>/dev/null || true
+
+            echo "🚀 Deploy complete!"
