@@ -84,9 +84,8 @@ jobs:
             echo "Previous image: ${PREV_IMAGE:-none (first deploy)}"
 
             # ── Ensure Postgres is up (never touch it during redeploy) ──
-            docker compose up -d postgres
             echo "Waiting for Postgres..."
-            docker compose exec -T postgres pg_isready -U productops -t 30
+            docker compose up -d --wait --wait-timeout 60 postgres
 
             # ── Rolling update: start new app, wait for health, then remove old ──
             echo "🔄 Starting new app container..."
