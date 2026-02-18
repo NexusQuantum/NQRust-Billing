@@ -123,7 +123,22 @@ jobs:
 
             # ── Run DB migrations ──
             echo "Running database schema push..."
-            docker compose exec -T app bunx drizzle-kit push --config=drizzle.config.ts 2>&1 || echo "⚠️  db:push skipped"
+            MIGRATION_TMP=$(mktemp -d)
+            docker create --name dbpush-tmp product-management:$IMAGE_TAG
+            mkdir -p "$MIGRATION_TMP/lib/db"
+            docker cp "dbpush-tmp:/app/drizzle.config.ts" "$MIGRATION_TMP/"
+            docker cp "dbpush-tmp:/app/lib/db/schema.ts" "$MIGRATION_TMP/lib/db/"
+            docker rm dbpush-tmp
+            DB_URL=$(grep ^DATABASE_URL "$DEPLOY_DIR/.env" | cut -d= -f2-)
+            docker run --rm \
+              --network product-management_default \
+              -e DATABASE_URL="$DB_URL" \
+              -v "$MIGRATION_TMP:/work" \
+              -w /work \
+              oven/bun:1 \
+              sh -c "bun add drizzle-kit drizzle-orm postgres --silent 2>/dev/null && bunx drizzle-kit push --config=drizzle.config.ts 2>&1" \
+              || echo "⚠️  db:push skipped"
+            rm -rf "$MIGRATION_TMP"
 
             # ── Cleanup ──
             rm -rf "$DEPLOY_TMP"
