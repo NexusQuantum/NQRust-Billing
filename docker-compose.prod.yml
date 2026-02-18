@@ -20,7 +20,7 @@ services:
     container_name: productops-app
     restart: unless-stopped
     ports:
-      - "${APP_PORT:-3000}:3000"
+      - "${APP_PORT:-13300}:3000"
     env_file:
       - .env
     environment:
