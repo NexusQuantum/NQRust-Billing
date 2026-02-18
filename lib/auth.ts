@@ -75,9 +75,10 @@ export async function deleteSession(token: string) {
 
 export async function setSessionCookie(token: string) {
   const cookieStore = await cookies();
+  const isHttps = process.env.NEXTAUTH_URL?.startsWith("https://") ?? false;
   cookieStore.set(SESSION_COOKIE, token, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
+    secure: isHttps,
     sameSite: "lax",
     path: "/",
     maxAge: SESSION_EXPIRY_DAYS * 24 * 60 * 60,
