@@ -28,9 +28,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl && \
     useradd --system --uid 1001 --gid nodejs nextjs
 
 # Copy built output
-COPY --from=builder /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 
 # Copy drizzle config + schema for db:push migrations
 COPY --from=builder --chown=nextjs:nodejs /app/drizzle.config.ts ./
