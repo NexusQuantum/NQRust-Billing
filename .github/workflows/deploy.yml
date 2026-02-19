@@ -137,7 +137,7 @@ jobs:
               -v "$MIGRATION_TMP:/work" \
               -w /work \
               oven/bun:1 \
-              sh -c "bun add drizzle-kit drizzle-orm postgres --silent 2>/dev/null && bunx drizzle-kit push --config=drizzle.config.ts 2>&1" \
+              sh -c "bun add drizzle-kit drizzle-orm postgres --silent 2>/dev/null && bunx drizzle-kit push --config=drizzle.config.ts 2>&1; RESULT=\$?; chmod -R 777 /work; exit \$RESULT" \
               || echo "⚠️  db:push skipped"
             rm -rf "$MIGRATION_TMP"
 
