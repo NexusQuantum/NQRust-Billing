@@ -124,6 +124,7 @@ jobs:
             # ── Run DB migrations ──
             echo "Running database schema push..."
             MIGRATION_TMP=$(mktemp -d)
+            docker rm -f dbpush-tmp 2>/dev/null || true
             docker create --name dbpush-tmp product-management:$IMAGE_TAG
             mkdir -p "$MIGRATION_TMP/lib/db"
             docker cp "dbpush-tmp:/app/drizzle.config.ts" "$MIGRATION_TMP/"
