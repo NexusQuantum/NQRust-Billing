@@ -1,9 +1,10 @@
 import { db } from "@/lib/db";
-import { deals, customers, products, licenses } from "@/lib/db/schema";
+import { deals, customers, products, licenses, systemSettings } from "@/lib/db/schema";
 import { insertDealSchema } from "@/lib/validations/deals";
 import { desc, eq, and } from "drizzle-orm";
 import { NextRequest, NextResponse } from "next/server";
 import { generateLicenseKey } from "@/lib/license-keys";
+import { signLicense, type LicensePayload } from "@/lib/license-signing";
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
@@ -87,16 +88,44 @@ export async function POST(req: NextRequest) {
       expiresAt = expDate.toISOString().split("T")[0];
     }
 
-    await db.insert(licenses).values({
+    const createdAt = today.toISOString().split("T")[0];
+
+    // Check if signing keypair exists for auto-signing
+    const [privateKeySetting] = await db
+      .select()
+      .from(systemSettings)
+      .where(eq(systemSettings.key, "license_signing_private_key"));
+
+    const licenseValues: Record<string, unknown> = {
       key,
       customerId: data.customerId ?? null,
       customerName,
       productId: data.productId ?? null,
       productName,
       status: "active",
-      createdAt: today.toISOString().split("T")[0],
+      createdAt,
       expiresAt,
-    });
+    };
+
+    // Auto-sign if keypair exists
+    if (privateKeySetting) {
+      const payload: LicensePayload = {
+        licenseId: key,
+        customerId: data.customerId ?? "",
+        customerName,
+        productId: data.productId ?? "",
+        productName,
+        features: [],
+        issuedAt: createdAt,
+        expiresAt,
+      };
+      const signed = signLicense(payload, privateKeySetting.value);
+      licenseValues.licenseType = "signed";
+      licenseValues.signedPayload = JSON.stringify(signed.payload);
+      licenseValues.signature = signed.signature;
+    }
+
+    await db.insert(licenses).values(licenseValues);
   }
 
   const [row] = await db.insert(deals).values(data).returning();

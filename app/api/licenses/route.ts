@@ -1,7 +1,7 @@
 import { db } from "@/lib/db";
-import { licenses, customers, products } from "@/lib/db/schema";
+import { licenses, customers, products, licenseActivations } from "@/lib/db/schema";
 import { insertLicenseSchema } from "@/lib/validations/licenses";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, count } from "drizzle-orm";
 import { NextRequest, NextResponse } from "next/server";
 
 export async function GET(req: NextRequest) {
@@ -19,6 +19,13 @@ export async function GET(req: NextRequest) {
         .leftJoin(products, eq(licenses.productId, products.id))
         .orderBy(desc(licenses.createdAt));
 
+  // Get activation counts per license
+  const activationCounts = await db
+    .select({ licenseKey: licenseActivations.licenseKey, count: count() })
+    .from(licenseActivations)
+    .groupBy(licenseActivations.licenseKey);
+  const countMap = new Map(activationCounts.map((a) => [a.licenseKey, a.count]));
+
   const mapped = rows.map((r) => ({
     key: r.licenses.key,
     customer: r.customers?.name ?? r.licenses.customerName,
@@ -28,6 +35,11 @@ export async function GET(req: NextRequest) {
     status: r.licenses.status,
     createdAt: r.licenses.createdAt,
     expiresAt: r.licenses.expiresAt,
+    licenseType: r.licenses.licenseType,
+    features: r.licenses.features,
+    maxActivations: r.licenses.maxActivations,
+    hasCertificate: !!r.licenses.signature,
+    activationCount: countMap.get(r.licenses.key) ?? 0,
   }));
 
   return NextResponse.json(mapped);
@@ -60,5 +72,9 @@ export async function POST(req: NextRequest) {
     status: row.status,
     createdAt: row.createdAt,
     expiresAt: row.expiresAt,
+    licenseType: row.licenseType,
+    features: row.features,
+    maxActivations: row.maxActivations,
+    hasCertificate: !!row.signature,
   }, { status: 201 });
 }

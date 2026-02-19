@@ -135,6 +135,74 @@ export async function deleteLicense(key: string) {
   return res.json();
 }
 
+// ---- License Activations ----
+export function useLicenseActivations(key: string | null) {
+  return useSWR(key ? `/api/licenses/${key}/activations` : null, fetcher);
+}
+
+export async function deactivateDevice(key: string, deviceId: string) {
+  const res = await fetch(`/api/licenses/${key}/activations?deviceId=${encodeURIComponent(deviceId)}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) throw new Error("Failed to deactivate device");
+  return res.json();
+}
+
+// ---- License Signing ----
+export function useKeypair() {
+  return useSWR("/api/licenses/keypair", fetcher);
+}
+
+export async function generateKeypair(confirm?: boolean) {
+  const res = await fetch("/api/licenses/keypair", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ confirm }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    const err = new Error(data.error || "Failed to generate keypair");
+    (err as Error & { status: number }).status = res.status;
+    throw err;
+  }
+  return res.json();
+}
+
+export async function signLicenseKey(
+  key: string,
+  data: { features?: string[]; maxActivations?: number; metadata?: Record<string, unknown> },
+) {
+  const res = await fetch(`/api/licenses/${key}/sign`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const err = new Error("Failed to sign license");
+    (err as Error & { status: number }).status = res.status;
+    throw err;
+  }
+  return res.json();
+}
+
+export function getLicenseExportUrl(key: string) {
+  return `/api/licenses/${key}/export`;
+}
+
+export async function verifyLicenseFile(licenseFile: string) {
+  const res = await fetch("/api/licenses/verify", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ licenseFile }),
+  });
+  if (!res.ok) {
+    const err = new Error("Failed to verify license");
+    (err as Error & { status: number }).status = res.status;
+    throw err;
+  }
+  return res.json();
+}
+
 // ---- API Keys ----
 export function useApiKeys() {
   return useSWR("/api/api-keys", fetcher);

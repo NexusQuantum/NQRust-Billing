@@ -22,9 +22,14 @@ import {
   Eye,
   EyeOff,
   Loader2,
+  FileSignature,
+  Download,
+  ShieldCheck,
+  ShieldAlert,
+  Upload,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
-import { useApiKeys, createApiKey, revokeApiKey } from "@/hooks/use-api";
+import { useApiKeys, createApiKey, revokeApiKey, useKeypair, generateKeypair, verifyLicenseFile } from "@/hooks/use-api";
 import { toast } from "sonner";
 import { Skeleton } from "@/components/ui/skeleton";
 import { DeleteDialog } from "@/components/management/delete-dialog";
@@ -113,6 +118,13 @@ export function SettingsSection() {
           >
             <CreditCard className="w-4 h-4 mr-2" />
             Payment Providers
+          </TabsTrigger>
+          <TabsTrigger
+            value="license-signing"
+            className="data-[state=active]:bg-card data-[state=active]:text-foreground"
+          >
+            <FileSignature className="w-4 h-4 mr-2" />
+            License Signing
           </TabsTrigger>
         </TabsList>
 
@@ -241,6 +253,9 @@ export function SettingsSection() {
 
         {/* Payment Providers Tab */}
         <PaymentProvidersTab />
+
+        {/* License Signing Tab */}
+        <LicenseSigningTab />
       </Tabs>
     </div>
   );
@@ -674,6 +689,312 @@ function PaymentProvidersTab() {
           );
         })
       )}
+    </TabsContent>
+  );
+}
+
+/* ---------- License Signing Tab ---------- */
+
+function LicenseSigningTab() {
+  const { data: keypairData, isLoading, mutate } = useKeypair();
+  const [generating, setGenerating] = useState(false);
+  const [confirmRegenOpen, setConfirmRegenOpen] = useState(false);
+  const [copiedPubKey, setCopiedPubKey] = useState(false);
+
+  // Verify section
+  const [licenseFileContent, setLicenseFileContent] = useState("");
+  const [verifying, setVerifying] = useState(false);
+  const [verifyResult, setVerifyResult] = useState<{
+    valid: boolean;
+    expired: boolean;
+    payload: Record<string, unknown> | null;
+    error?: string;
+  } | null>(null);
+
+  const hasKeypair = keypairData?.hasKeypair ?? false;
+  const publicKey = keypairData?.publicKey ?? "";
+
+  const handleGenerate = async (confirm?: boolean) => {
+    setGenerating(true);
+    try {
+      await generateKeypair(confirm);
+      mutate();
+      toast.success("Signing keypair generated");
+      setConfirmRegenOpen(false);
+    } catch (err) {
+      if ((err as Error & { status?: number }).status === 409) {
+        setConfirmRegenOpen(true);
+      } else {
+        toast.error("Failed to generate keypair");
+      }
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const handleCopyPublicKey = () => {
+    navigator.clipboard.writeText(publicKey);
+    setCopiedPubKey(true);
+    setTimeout(() => setCopiedPubKey(false), 2000);
+  };
+
+  const handleDownloadPublicKey = () => {
+    const blob = new Blob([publicKey], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "license-signing-public-key.pem";
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleVerify = async () => {
+    if (!licenseFileContent.trim()) {
+      toast.error("Paste a .lic file content to verify");
+      return;
+    }
+    setVerifying(true);
+    setVerifyResult(null);
+    try {
+      const result = await verifyLicenseFile(licenseFileContent);
+      setVerifyResult(result);
+    } catch {
+      toast.error("Failed to verify license file");
+    } finally {
+      setVerifying(false);
+    }
+  };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      setLicenseFileContent(reader.result as string);
+      setVerifyResult(null);
+    };
+    reader.readAsText(file);
+    e.target.value = "";
+  };
+
+  if (isLoading) {
+    return (
+      <TabsContent value="license-signing" className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
+        <Skeleton className="h-48 w-full rounded-xl" />
+        <Skeleton className="h-32 w-full rounded-xl" />
+      </TabsContent>
+    );
+  }
+
+  return (
+    <TabsContent value="license-signing" className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
+      {/* Keypair Management */}
+      <Card className="border-border bg-card">
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${hasKeypair ? "bg-accent/20" : "bg-secondary"}`}>
+                <FileSignature className={`w-5 h-5 ${hasKeypair ? "text-accent" : "text-muted-foreground"}`} />
+              </div>
+              <div>
+                <CardTitle className="text-base font-medium flex items-center gap-2">
+                  Ed25519 Signing Keypair
+                  <Badge className={hasKeypair
+                    ? "bg-accent/20 text-accent border-accent/30"
+                    : "bg-muted text-muted-foreground border-border"
+                  }>
+                    {hasKeypair ? "Active" : "Not configured"}
+                  </Badge>
+                </CardTitle>
+                <CardDescription>
+                  Generate a keypair to sign licenses for offline verification
+                </CardDescription>
+              </div>
+            </div>
+            <Button
+              onClick={() => hasKeypair ? setConfirmRegenOpen(true) : handleGenerate()}
+              disabled={generating}
+              variant={hasKeypair ? "outline" : "default"}
+              className={!hasKeypair ? "bg-accent hover:bg-accent/90 text-accent-foreground" : ""}
+            >
+              {generating ? (
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              ) : (
+                <RefreshCw className="w-4 h-4 mr-2" />
+              )}
+              {hasKeypair ? "Regenerate" : "Generate Keypair"}
+            </Button>
+          </div>
+        </CardHeader>
+        {hasKeypair && (
+          <CardContent className="space-y-4">
+            <div>
+              <Label className="text-xs text-muted-foreground uppercase tracking-wider">
+                Public Key (embed this in your client applications)
+              </Label>
+              <textarea
+                readOnly
+                value={publicKey}
+                className="mt-1.5 w-full h-32 rounded-lg bg-secondary border border-border p-3 font-mono text-xs text-muted-foreground resize-none focus:outline-none"
+              />
+              <div className="flex items-center gap-2 mt-2">
+                <Button variant="outline" size="sm" onClick={handleCopyPublicKey}>
+                  {copiedPubKey ? <Check className="w-4 h-4 mr-1.5 text-accent" /> : <Copy className="w-4 h-4 mr-1.5" />}
+                  {copiedPubKey ? "Copied" : "Copy"}
+                </Button>
+                <Button variant="outline" size="sm" onClick={handleDownloadPublicKey}>
+                  <Download className="w-4 h-4 mr-1.5" />
+                  Download .pem
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        )}
+      </Card>
+
+      {/* How it works */}
+      <Card className="border-border bg-card">
+        <CardHeader>
+          <CardTitle className="text-base font-medium">How Offline Licensing Works</CardTitle>
+          <CardDescription>Cryptographic license verification without server connectivity</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-3 text-sm text-muted-foreground">
+            <div className="flex items-start gap-3">
+              <span className="w-6 h-6 rounded-full bg-accent/20 text-accent flex items-center justify-center text-xs font-semibold shrink-0">1</span>
+              <p>Generate an Ed25519 keypair above. The private key stays on the server, the public key goes into your app.</p>
+            </div>
+            <div className="flex items-start gap-3">
+              <span className="w-6 h-6 rounded-full bg-accent/20 text-accent flex items-center justify-center text-xs font-semibold shrink-0">2</span>
+              <p>When you sign a license, the customer/product/features/expiry data is cryptographically signed with the private key.</p>
+            </div>
+            <div className="flex items-start gap-3">
+              <span className="w-6 h-6 rounded-full bg-accent/20 text-accent flex items-center justify-center text-xs font-semibold shrink-0">3</span>
+              <p>Export the signed license as a <code className="px-1 py-0.5 bg-secondary rounded text-xs font-mono">.lic</code> file and distribute it to customers.</p>
+            </div>
+            <div className="flex items-start gap-3">
+              <span className="w-6 h-6 rounded-full bg-accent/20 text-accent flex items-center justify-center text-xs font-semibold shrink-0">4</span>
+              <p>Your app verifies the <code className="px-1 py-0.5 bg-secondary rounded text-xs font-mono">.lic</code> file using the embedded public key — no internet required.</p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Verify License */}
+      {hasKeypair && (
+        <Card className="border-border bg-card">
+          <CardHeader>
+            <CardTitle className="text-base font-medium">Verify License File</CardTitle>
+            <CardDescription>Paste or upload a .lic file to verify its signature</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div>
+              <textarea
+                placeholder={"-----BEGIN LICENSE-----\n...\n-----END LICENSE-----\n-----BEGIN SIGNATURE-----\n...\n-----END SIGNATURE-----"}
+                value={licenseFileContent}
+                onChange={(e) => { setLicenseFileContent(e.target.value); setVerifyResult(null); }}
+                className="w-full h-40 rounded-lg bg-secondary border border-border p-3 font-mono text-xs text-foreground placeholder:text-muted-foreground/50 resize-none focus:outline-none focus:ring-2 focus:ring-ring/20 focus:border-accent transition-all"
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <Button onClick={handleVerify} disabled={verifying || !licenseFileContent.trim()}>
+                {verifying ? <Loader2 className="w-4 h-4 mr-1.5 animate-spin" /> : <ShieldCheck className="w-4 h-4 mr-1.5" />}
+                Verify
+              </Button>
+              <Button variant="outline" asChild>
+                <label className="cursor-pointer">
+                  <Upload className="w-4 h-4 mr-1.5" />
+                  Upload .lic
+                  <input type="file" accept=".lic,.txt" onChange={handleFileUpload} className="hidden" />
+                </label>
+              </Button>
+            </div>
+
+            {verifyResult && (
+              <div className={`rounded-lg border p-4 ${verifyResult.valid ? "border-accent/30 bg-accent/5" : "border-destructive/30 bg-destructive/5"}`}>
+                <div className="flex items-center gap-2 mb-3">
+                  {verifyResult.valid ? (
+                    <>
+                      <ShieldCheck className="w-5 h-5 text-accent" />
+                      <span className="font-medium text-accent text-sm">
+                        Signature Valid
+                        {verifyResult.expired && " (Expired)"}
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <ShieldAlert className="w-5 h-5 text-destructive" />
+                      <span className="font-medium text-destructive text-sm">
+                        {verifyResult.error || "Invalid Signature"}
+                      </span>
+                    </>
+                  )}
+                </div>
+                {verifyResult.valid && verifyResult.payload && (
+                  <div className="grid grid-cols-2 gap-3 text-xs">
+                    <div>
+                      <span className="text-muted-foreground">License ID</span>
+                      <p className="font-mono text-foreground mt-0.5">{verifyResult.payload.licenseId as string}</p>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground">Customer</span>
+                      <p className="text-foreground mt-0.5">{verifyResult.payload.customerName as string}</p>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground">Product</span>
+                      <p className="text-foreground mt-0.5">{verifyResult.payload.productName as string}</p>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground">Expires</span>
+                      <p className={`mt-0.5 ${verifyResult.expired ? "text-destructive" : "text-foreground"}`}>
+                        {verifyResult.payload.expiresAt as string}
+                        {verifyResult.expired && " (expired)"}
+                      </p>
+                    </div>
+                    {(verifyResult.payload.features as string[])?.length > 0 && (
+                      <div className="col-span-2">
+                        <span className="text-muted-foreground">Features</span>
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {(verifyResult.payload.features as string[]).map((f) => (
+                            <Badge key={f} variant="secondary" className="text-xs">{f}</Badge>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Regenerate Confirmation Dialog */}
+      <Dialog open={confirmRegenOpen} onOpenChange={setConfirmRegenOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Regenerate Signing Keypair?</DialogTitle>
+            <DialogDescription>
+              This will create a new keypair and replace the existing one. Previously signed licenses will no longer be verifiable with the new public key.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex items-start gap-2 text-xs text-warning mt-2">
+            <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+            <p>Any .lic files generated with the old keypair will fail verification. Make sure all customers have updated licenses before regenerating.</p>
+          </div>
+          <DialogFooter className="mt-4">
+            <Button variant="outline" onClick={() => setConfirmRegenOpen(false)}>Cancel</Button>
+            <Button
+              variant="destructive"
+              onClick={() => handleGenerate(true)}
+              disabled={generating}
+            >
+              {generating ? <Loader2 className="w-4 h-4 mr-1.5 animate-spin" /> : <RefreshCw className="w-4 h-4 mr-1.5" />}
+              Regenerate
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </TabsContent>
   );
 }

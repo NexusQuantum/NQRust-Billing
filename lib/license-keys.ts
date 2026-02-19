@@ -18,14 +18,21 @@ export function generateLicenseKey(): string {
 }
 
 export type LicenseStatus = "active" | "expired" | "revoked" | "suspended";
+export type LicenseType = "simple" | "signed";
 
 export interface License {
   key: string;
   customer: string;
+  customerId?: string;
   product: string;
+  productId?: string;
   status: LicenseStatus;
+  licenseType: LicenseType;
   createdAt: string;
   expiresAt: string;
+  features?: string[];
+  maxActivations?: number;
+  hasCertificate?: boolean;
 }
 
 export function getStatusColor(status: LicenseStatus): string {
@@ -39,4 +46,10 @@ export function getStatusColor(status: LicenseStatus): string {
     case "suspended":
       return "bg-orange-500/10 text-orange-500";
   }
+}
+
+export function getLicenseTypeBadge(type: LicenseType) {
+  return type === "signed"
+    ? { label: "Signed", className: "bg-chart-1/10 text-chart-1" }
+    : { label: "Simple", className: "bg-secondary text-muted-foreground" };
 }

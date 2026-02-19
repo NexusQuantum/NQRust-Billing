@@ -27,6 +27,10 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ key:
     status: row.status,
     createdAt: row.createdAt,
     expiresAt: row.expiresAt,
+    licenseType: row.licenseType,
+    features: row.features,
+    maxActivations: row.maxActivations,
+    hasCertificate: !!row.signature,
   });
 }
 

@@ -124,7 +124,27 @@ export const licenses = pgTable("licenses", {
   status: licenseStatusEnum("status").notNull().default("active"),
   createdAt: varchar("created_at", { length: 20 }).notNull(),
   expiresAt: varchar("expires_at", { length: 20 }).notNull(),
+  // Offline license signing fields
+  licenseType: varchar("license_type", { length: 10 }).notNull().default("simple"),
+  signedPayload: text("signed_payload"),
+  signature: text("signature"),
+  features: jsonb("features").$type<string[]>(),
+  maxActivations: integer("max_activations"),
 });
+
+// ---- License Activations ----
+export const licenseActivations = pgTable("license_activations", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  licenseKey: varchar("license_key", { length: 50 }).notNull().references(() => licenses.key, { onDelete: "cascade" }),
+  deviceId: varchar("device_id", { length: 255 }).notNull(),
+  deviceName: varchar("device_name", { length: 255 }),
+  ipAddress: varchar("ip_address", { length: 45 }),
+  activatedAt: timestamp("activated_at").defaultNow().notNull(),
+  lastSeenAt: timestamp("last_seen_at").defaultNow().notNull(),
+}, (t) => [
+  unique("license_activations_key_device_unique").on(t.licenseKey, t.deviceId),
+  index("license_activations_license_key_idx").on(t.licenseKey),
+]);
 
 // ---- API Keys ----
 export const apiKeys = pgTable("api_keys", {
@@ -424,9 +444,14 @@ export const dealsRelations = relations(deals, ({ one }) => ({
   product: one(products, { fields: [deals.productId], references: [products.id] }),
 }));
 
-export const licensesRelations = relations(licenses, ({ one }) => ({
+export const licensesRelations = relations(licenses, ({ one, many }) => ({
   customer: one(customers, { fields: [licenses.customerId], references: [customers.id] }),
   product: one(products, { fields: [licenses.productId], references: [products.id] }),
+  activations: many(licenseActivations),
+}));
+
+export const licenseActivationsRelations = relations(licenseActivations, ({ one }) => ({
+  license: one(licenses, { fields: [licenseActivations.licenseKey], references: [licenses.key] }),
 }));
 
 export const usersRelations = relations(users, ({ many }) => ({
