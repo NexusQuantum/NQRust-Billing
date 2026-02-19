@@ -112,7 +112,7 @@ export function Sidebar({
               collapsed ? "opacity-0 w-0" : "opacity-100 w-auto"
             )}
           >
-            {appConfig.shortName}
+            {appConfig.name}
           </span>
         </div>
       </div>
