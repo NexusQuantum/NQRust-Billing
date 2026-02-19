@@ -70,13 +70,7 @@ export function Header({ activeSection, onOpenSearch }: HeaderProps) {
         </h1>
         <div className="hidden md:flex items-center gap-2 text-sm text-muted-foreground">
           <Calendar className="w-4 h-4" />
-          <span>{(() => {
-            const now = new Date();
-            const thirtyDaysAgo = new Date(now);
-            thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-            const fmt = (d: Date) => d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-            return `${fmt(thirtyDaysAgo)} — ${fmt(now)}`;
-          })()}</span>
+          <span>All time</span>
         </div>
       </div>
 
